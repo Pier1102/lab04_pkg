@@ -61,7 +61,7 @@ class Dwa_node(Node):
         self.max_ang_acc = 3.2
         self.min_linear_vel=0.0
         self.max_linear_vel=0.22
-        self.min_angular_vel=0.0
+        self.min_angular_vel= -2.5
         self.max_angular_vel=2.5 
         self.sim_step = round(self.sim_time / self.time_granularity)
         self.declare_parameter("robot_radius", 0.25) # O la dimensione del tuo robot
@@ -109,8 +109,8 @@ class Dwa_node(Node):
          else:
             self.obstacles[i] = np.inf
 
-     if self.obstacles[i]  <= self.obst_tolerance:
-        self.get_logger().info('detected obstacle at: {:.2f} m'.format(self.obstacles[i])) 
+         if self.obstacles[i]  <= self.obst_tolerance:
+          self.get_logger().info('detected obstacle at: {:.2f} m'.format(self.obstacles[i])) 
     
      #Filter scan ranges 
      self.filtered_obstacles = np.zeros(self.num_ranges) #array to store filtered obstacles of dimension num_ranges(ossia quanti settori voglio dividere il campo visivo del laser)
@@ -321,6 +321,12 @@ class Dwa_node(Node):
     
     def go_to_pose_callback(self): #core of the program, this generates command to reach a goal
      
+     if not self.goal_received:
+        self.get_logger().info("Waiting for goal...")
+        return
+     if self.obstacles_xy.shape[0] == 0: #in questo modo controllo se ho ricevuto almeno un laser scan
+        self.get_logger().warn("No obstacles yet, skipping DWA step")
+        return
      msg=Twist()
      self.initial_feedback_step+=1
      self.robot_state=np.array([self.x,self.y,self.yaw])
@@ -329,10 +335,7 @@ class Dwa_node(Node):
      self.dist_to_goal=np.linalg.norm(self.robot_x_y - self.goal_position)
      self.get_logger().info(f"Distance to goal: {self.dist_to_goal:.2f}")
 
-     if not self.goal_received:
-          self.get_logger().info("Waiting for goal...")
-          return
-     
+
     #safety check
      if np.min(self.filtered_obstacles) < 0.25:
               
@@ -353,7 +356,9 @@ class Dwa_node(Node):
      self.goal_position=np.array([self.goal_x,self.goal_y])
      self.robot_x_y=np.array([self.x,self.y])
      self.dist_to_goal=np.linalg.norm(self.robot_x_y - self.goal_position)
-     self.get_logger().info(f"Distance to goal: {self.dist_to_goal:.2f}")
+     if self.initial_feedback_step % self.feedback_steps_max == 0: # print feedback every feedback_steps_max steps
+      self.get_logger().info(f"Distance to goal: {self.dist_to_goal:.2f}")
+
 
      self.goal_reached=False
 
