@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'lab05_pkg'
+package_name = 'lab04_pkg'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'dwa_node = lab05_pkg.dwa_node:main'
+            'dwa_node = lab04_pkg.dwa_node:main'
         ],
     },
 )

@@ -1,5 +1,5 @@
 import numpy as np
-from ros2_ws.src.lab05_pkg.lab05_pkg.utils import Differential_drive_robot, normalize_angle, normalize, calc_nearest_obs
+from ros2_ws.src.lab04_pkg.lab04_pkg.utils import Differential_drive_robot, normalize_angle, normalize, calc_nearest_obs
 # it is a control system  
 # DWA
 class DWA():
@@ -56,9 +56,9 @@ class DWA():
 
         print("Initial distance to goal: ", dist_to_goal)
         print("Initial Robot pose: ", self.robot.pose)
-#your goal is to implement this function with the same logic in your node
+        #your goal is to implement this function with the same logic in your node
         steps = 1
-    #in ROS you can't use this function because there is the while loop, in your node you can use a timer that will call at a certain frequency a method that do these steps
+        #in ROS you can't use this function because there is the while loop, in your node you can use a timer that will call at a certain frequency a method that do these steps
         while steps <= self.max_num_steps:
             # 1. Check if Goal reached
             dist_to_goal = np.linalg.norm(self.robot.pose[0:2] - goal_pose)
@@ -116,7 +116,10 @@ class DWA():
         min_lin_vel, max_lin_vel, min_ang_vel, max_ang_vel = self.compute_dynamic_window(self.robot.vel)
         
         v_values = np.linspace(min_lin_vel, max_lin_vel, self.v_samples)
-        w_values = np.linspace(min_ang_vel, max_ang_vel, self.w_samples) # i'm creating a grid of linear and angular velocities, and there are self.vsamples elements for the linear velocitiy and self.wsamples elements for the angular velocity
+        w_values = np.linspace(min_ang_vel, max_ang_vel, self.w_samples) 
+        # i'm creating a grid of linear and angular velocities, 
+        #and there are self.vsamples elements for the linear velocitiy and
+        #self.wsamples elements for the angular velocity
 
         # list of all paths and velocities
         n_paths = w_values.shape[0]*v_values.shape[0]
