@@ -8,7 +8,7 @@ import math
 import numpy as np
 from lab04_pkg.utils import * 
 from std_msgs.msg import String, Float32
-
+from landmark_msgs.msg import LandmarkArray  
 
 class Dwa_node(Node):
     def __init__(self):
@@ -16,7 +16,7 @@ class Dwa_node(Node):
         self.get_logger().info('dwa_node started.')
         # === PARAMETRI ===
         self.declare_parameter("dt", 0.1) # time interval for simulation
-        self.declare_parameter("sim_time", 2.0) #simulation time for each trajectory
+        self.declare_parameter("sim_time", 1.0) #simulation time for each trajectory
         self.declare_parameter("time_granularity", 0.1) #time granularity for simulation
 
         self.declare_parameter("v_samples", 10) #how many values of linear velocity to sample
@@ -64,10 +64,10 @@ class Dwa_node(Node):
         self.goal_received = False
         self.goal_x = None
         self.goal_y = None
-        self.max_linear_acc = 2.5
-        self.max_ang_acc = 3.2
+        self.max_linear_acc = 0.5
+        self.max_ang_acc = 1.
         self.min_linear_vel=0.0
-        self.max_linear_vel=0.25
+        self.max_linear_vel=0.15
         self.min_angular_vel= -1.
         self.max_angular_vel=1.
         self.sim_step = round(self.sim_time / self.time_granularity)
@@ -95,7 +95,7 @@ class Dwa_node(Node):
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.goal_sub = self.create_subscription(Odometry,'/dynamic_goal_pose',self.goal_callback,10)
+        #self.goal_sub = self.create_subscription(Odometry,'/dynamic_goal_pose',self.goal_callback,10)
 
         self.step_count = 0          # contatore globale dei passi di controllo
 
@@ -104,6 +104,8 @@ class Dwa_node(Node):
 
         # publisher per evento finale Goal / Collision / Timeout
         self.status_pub = self.create_publisher(String, '/dwa/status', 10)
+
+        self.landmark_sub = self.create_subscription(LandmarkArray,'/camera/landmarks',self.landmark_callback,10)
 
 
     def odom_callback(self, msg: Odometry):
@@ -167,11 +169,49 @@ class Dwa_node(Node):
      self.obstacles_xy = np.array(self.obstacles_xy)
         # ora self.obstacles_xy è ciò che devi dare all’algoritmo DWA
 
-    def goal_callback(self, msg: Odometry): #goal callback to get dynamic goal (GoalManager node)
-        self.goal_x = msg.pose.pose.position.x
-        self.goal_y = msg.pose.pose.position.y
+    def landmark_callback(self, msg: LandmarkArray):
+        """
+        Callback to process landmark data from the camera.
+        Converts landmark positions from robot frame to world frame.
+        """
+        if len(msg.landmarks) == 0:
+            return  # No landmarks detected
+
+        # scegli il tag che ti interessa; qui prendo il primo
+        lm = msg.landmarks[0]
+        
+        # ATTENZIONE: controlla i nomi dei campi nel tuo Landmark.msg
+        r = lm.range      # distanza dal tag [m]
+        beta = lm.bearing # angolo rispetto all'asse del robot [rad]
+        self.get_logger().info(f"[Landmark] range = {r:.3f} m, bearing = {beta:.3f} rad")
+
+
+        # 1) coordinate tag nel frame ROBOT (base_link)
+        x_tag_base = r * math.cos(beta)
+        y_tag_base = r * math.sin(beta)
+
+        # 2) trasformazione nel frame odom usando la posa del robot
+        x_r = self.x
+        y_r = self.y
+        yaw_r = self.yaw
+
+        x_tag_odom = x_r + x_tag_base * math.cos(yaw_r) - y_tag_base * math.sin(yaw_r)
+        y_tag_odom = y_r + x_tag_base * math.sin(yaw_r) + y_tag_base * math.cos(yaw_r)
+
+        # 3) aggiorna il goal del DWA
+        self.goal_x = x_tag_odom
+        self.goal_y = y_tag_odom
         self.goal_received = True
-        self.get_logger().info('New goal received: ({:.2f}, {:.2f})'.format(self.goal_x, self.goal_y))
+
+        self.get_logger().info(
+            f"New goal from AprilTag: ({self.goal_x:.2f}, {self.goal_y:.2f})")
+
+       
+    # def goal_callback(self, msg: Odometry): #goal callback to get dynamic goal (GoalManager node)
+    #     self.goal_x = msg.pose.pose.position.x
+    #     self.goal_y = msg.pose.pose.position.y
+    #     self.goal_received = True
+    #     self.get_logger().info('New goal received: ({:.2f}, {:.2f})'.format(self.goal_x, self.goal_y))
 
 
     def simulate_paths(self, n_paths, pose, u): #pose given by odometry
