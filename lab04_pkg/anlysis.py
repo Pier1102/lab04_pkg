@@ -9,9 +9,10 @@ from tf_transformations import euler_from_quaternion
 from rclpy.time import Time
 from scipy.interpolate import interp1d
 from rclpy.serialization import deserialize_message
+from lab04_pkg.utils import rmse , normalize_angle
 
 
-bag_path = "/home/miky/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
+bag_path = "/home/cesare/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
 reader = Rosbag2Reader(bag_path)
 
 status_topic = "/dwa/status"
@@ -119,6 +120,7 @@ w_cmd = np.array(data['/cmd_vel']['w'])
 
 robot_data = np.vstack((robot_x, robot_y,robot_th)).T   
 odom_data = np.vstack((odom_x,odom_y,odom_th)).T
+target_data = np.vstack((target_x, target_y, target_th)).T  
 
 
 offset_x = robot_data[0, 0] - odom_data[0, 0]
@@ -162,8 +164,7 @@ dy = tgt_y - robot_y
 dist = np.hypot(dx, dy)
 
 angle_to_target = np.arctan2(dy, dx)
-bearing = angle_to_target - robot_th
-bearing = (bearing + np.pi) % (2 * np.pi) - np.pi   # wrap in [-pi, pi]
+bearing = normalize_angle(angle_to_target - robot_th)  # wrap in [-pi, pi]
 
 dist_ok = np.abs(dist - follow_dist) <= dist_tol
 bearing_ok = np.abs(bearing) <= bearing_tol_rad
@@ -176,6 +177,18 @@ total_time = robot_t[-1] - robot_t[0]
 tracking_time = np.sum(dt[tracking_mask])
 
 tracking_percent = 100.0 * tracking_time / total_time
+
+# ================== COMPUTING RMSE ==================
+
+rmse_x = rmse(robot_data[:, 0], target_on_robot[:, 0])
+rmse_y = rmse(robot_data[:, 1], target_on_robot[:, 1])
+rmse_th = rmse(robot_data[:, 2], target_on_robot[:, 2])
+print("\n===== RMSE BETWEEN ROBOT AND TARGET =====")
+print(f"RMSE X:     {rmse_x:.3f} m")
+print(f"RMSE Y:     {rmse_y:.3f} m")
+print(f"RMSE Theta: {math.degrees(rmse_th):.3f} deg")
+
+
 
 print("\n===== TIME OF TRACKING =====")
 print(f"Total time:       {total_time:.2f} s")
@@ -218,3 +231,4 @@ plt.ylabel("Angular Vel [rad/s]")
 plt.grid(True)
 plt.legend(loc="upper right")
 plt.show()
+

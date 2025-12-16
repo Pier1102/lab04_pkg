@@ -2,6 +2,7 @@ import numpy as np
 import math
 
 
+
 class Differential_drive_robot():
     def __init__(self, 
                 init_pose,
@@ -93,4 +94,22 @@ def sigmoid(x: np.ndarray):
   """ compute sigmoid smoothing activation of a given array of values"""
   return 1/(1 + np.exp(-x)) 
 
-__all__ = ['normalize','calc_nearest_obs','normalize_angle']
+def _error(actual: np.ndarray, predicted: np.ndarray):
+    """ Simple error """
+    return actual - predicted
+
+def mse(actual: np.ndarray, predicted: np.ndarray):
+    """ Mean Squared Error """
+    if len(actual.shape)==1 and len(predicted.shape)==1:
+        return np.mean(np.square(_error(actual, predicted)), axis=0)
+    return np.mean(np.sum(np.square(_error(actual, predicted)), axis=1), axis=0)
+
+def rmse(actual: np.ndarray, predicted: np.ndarray):
+    """ Root Mean Squared Error """
+    return np.sqrt(mse(actual, predicted))
+
+
+
+__all__ = ['normalize','calc_nearest_obs','normalize_angle','rmse']
+
+
