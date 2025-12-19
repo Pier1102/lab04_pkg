@@ -10,8 +10,6 @@ from scipy.interpolate import interp1d
 from lab04_pkg.utils import rmse , normalize_angle
 from sensor_msgs.msg import LaserScan
 
-
-
 bag_path = "/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
 #bag_path = "/home/pier/Desktop/rosbag2_PIER"
 reader = Rosbag2Reader(bag_path)
