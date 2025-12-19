@@ -108,8 +108,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray):
     """ Root Mean Squared Error """
     return np.sqrt(mse(actual, predicted))
 
-
-
 __all__ = ['normalize','calc_nearest_obs','normalize_angle','rmse']
 
 

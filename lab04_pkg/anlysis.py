@@ -3,16 +3,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
 from rosbag2_reader_py import Rosbag2Reader 
 from tf_transformations import euler_from_quaternion
 from rclpy.time import Time
 from scipy.interpolate import interp1d
-from rclpy.serialization import deserialize_message
 from lab04_pkg.utils import rmse , normalize_angle
+from sensor_msgs.msg import LaserScan
 
 
-bag_path = "/home/cesare/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
+
+bag_path = "/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
+#bag_path = "/home/pier/Desktop/rosbag2_PIER"
 reader = Rosbag2Reader(bag_path)
 
 status_topic = "/dwa/status"
@@ -178,22 +179,69 @@ tracking_time = np.sum(dt[tracking_mask])
 
 tracking_percent = 100.0 * tracking_time / total_time
 
-# ================== COMPUTING RMSE ==================
-
-rmse_x = rmse(robot_data[:, 0], target_on_robot[:, 0])
-rmse_y = rmse(robot_data[:, 1], target_on_robot[:, 1])
-rmse_th = rmse(robot_data[:, 2], target_on_robot[:, 2])
-print("\n===== RMSE BETWEEN ROBOT AND TARGET =====")
-print(f"RMSE X:     {rmse_x:.3f} m")
-print(f"RMSE Y:     {rmse_y:.3f} m")
-print(f"RMSE Theta: {math.degrees(rmse_th):.3f} deg")
-
-
 
 print("\n===== TIME OF TRACKING =====")
 print(f"Total time:       {total_time:.2f} s")
 print(f"Tracking time:    {tracking_time:.2f} s")
 print(f"Time of tracking: {tracking_percent:.1f} %")
+
+# --- RMSE POSIZIONE ---
+rmse_x = rmse(robot_data[:, 0], target_on_robot[:, 0])
+rmse_y = rmse(robot_data[:, 1], target_on_robot[:, 1])
+
+
+# --- RMSE ORIENTAZIONE ---
+# direzione dal robot verso il target
+dx = target_on_robot[:, 0] - robot_data[:, 0]
+dy = target_on_robot[:, 1] - robot_data[:, 1]
+angle_to_target = np.arctan2(dy, dx)
+
+# errore di heading del robot rispetto al target
+heading_err = normalize_angle(robot_data[:, 2] - angle_to_target)
+
+# RMSE angolare
+rmse_heading = math.sqrt(np.mean(heading_err**2))
+
+
+print("\n===== RMSE  =====")
+print(f"RMSE X:        {rmse_x:.3f} m")
+print(f"RMSE Y:        {rmse_y:.3f} m")
+print(f"RMSE Heading:  {math.degrees(rmse_heading):.3f} deg")
+
+#=================== Overall average and minimum distance [m] from the obstacles ===================
+topics_to_read = ["/scan"]
+reader.set_filter(topics_to_read)
+ranges = []
+
+for topic_name, msg, t in reader:
+    if topic_name == "/scan" and isinstance(msg, LaserScan):
+        r = np.array(msg.ranges, dtype=float)
+        # sostituisco NaN e +inf con un valore molto grande
+        r = np.nan_to_num(r, nan=np.inf, posinf=np.inf)
+
+        ranges.append(r)
+
+reader.reset_filter()
+if len(ranges) == 0:
+    print("\nNo LaserScan messages found in  /scan.")
+else:
+    # Calcolo delle statistiche
+    all_ranges = np.concatenate(ranges)
+
+    # tolgo solo valori inf e <= 0 (niente maschere sugli angoli ecc)
+    finite_ranges = all_ranges[np.isfinite(all_ranges) & (all_ranges > 0.0)]
+
+    if finite_ranges.size == 0:
+        print("Nessuna distanza valida trovata (tutto inf o 0)")
+    else:
+        avg_distance = np.mean(finite_ranges)
+        min_distance = np.min(finite_ranges)
+
+
+        print(f"Distanza media: {avg_distance:.2f} m")
+        print(f"Distanza minima: {min_distance:.2f} m")
+
+
 
 # ================== PLOT TRAJECTORY 2D ==================
 plt.figure(figsize=(10,5)) 
@@ -206,7 +254,7 @@ plt.ylabel("Y Position [m]")
 plt.legend(loc="best") 
 plt.grid(True) 
 plt.axis('equal') 
-plt.savefig("trajectory_aligned.png", dpi=300)
+#plt.savefig("trajectory_aligned.png", dpi=300)
 plt.show()
 
 if len(t_cmd) > 0: #allineamento del tempo 
