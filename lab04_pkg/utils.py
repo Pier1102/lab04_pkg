@@ -109,5 +109,3 @@ def rmse(actual: np.ndarray, predicted: np.ndarray):
     return np.sqrt(mse(actual, predicted))
 
 __all__ = ['normalize','calc_nearest_obs','normalize_angle','rmse']
-
-

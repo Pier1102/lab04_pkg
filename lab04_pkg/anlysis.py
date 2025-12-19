@@ -14,12 +14,12 @@ bag_path = "/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag_lab04_task1_task2"
 #bag_path = "/home/pier/Desktop/rosbag2_PIER"
 reader = Rosbag2Reader(bag_path)
 
-status_topic = "/dwa/status"
+#=====COMPUTE SUCCESS RATE ======
 
+status_topic = "/dwa/status"
 topics_status = [status_topic]
 reader.set_filter(topics_status)
 
-# contatori
 n_goal = 0
 n_collision = 0
 n_timeout = 0
@@ -27,7 +27,6 @@ n_timeout = 0
 for topic_name, msg, t in reader:
     if topic_name == status_topic and isinstance(msg, String):
         status = msg.data
-        
         if status in ["Goal Reached"]:
             n_goal += 1
         elif status == "Collision":
@@ -49,7 +48,9 @@ if n_total > 0:
 else:
     print("\nNo status messages found in the bag.")
 
-follow_dist     = 0.2                 # distanza ideale che avevi nel DWA
+#===== COMPUTE TIME OF TRACKING ======
+
+follow_dist     = 0.2                 # distanza ideale 
 dist_tol        = 0.3                 # tolleranza sulla distanza
 bearing_tol_rad = math.radians(60.0)   # 60 gradi
 
@@ -84,11 +85,11 @@ for topic_name, msg, t in reader:
         data[topic_name]["theta"].append(theta)
     elif topic_name=="/cmd_vel":
 
-        stamp = Time.from_msg(msg.header.stamp).nanoseconds * 1e-9 if hasattr(msg, 'header') else t # Se t è il tempo del bag
+        stamp = Time.from_msg(msg.header.stamp).nanoseconds * 1e-9 if hasattr(msg, 'header') else t 
 
         # Estrai direttamente le velocità
         v = msg.linear.x      # Velocità Lineare
-        w = msg.angular.z     # Velocità Angolare (Ricorda: Z, non X!)
+        w = msg.angular.z     # Velocità Angolare 
 
         # Salva i dati
         data[topic_name]["t"].append(stamp)
@@ -141,8 +142,6 @@ if len(robot_t) < 2 or len(target_t) < 2:
 
 #================== INTERPOLAZIONE TARGET SUI TEMPI DEL ROBOT ==================
 
-target_data = np.vstack((target_x, target_y, target_th)).T
-
 interp_target = interp1d(
     target_t,
     target_data,
@@ -154,7 +153,7 @@ interp_target = interp1d(
 target_on_robot = interp_target(robot_t)
 tgt_x = target_on_robot[:, 0]
 tgt_y = target_on_robot[:, 1]
-tgt_th = target_on_robot[:, 2]  # se ti serve
+tgt_th = target_on_robot[:, 2]  
 
 # ================== DISTANZA E BEARING ==================
 
@@ -165,30 +164,28 @@ dist = np.hypot(dx, dy)
 angle_to_target = np.arctan2(dy, dx)
 bearing = normalize_angle(angle_to_target - robot_th)  # wrap in [-pi, pi]
 
-dist_ok = np.abs(dist - follow_dist) <= dist_tol
-bearing_ok = np.abs(bearing) <= bearing_tol_rad
-tracking_mask = dist_ok & bearing_ok
+isdist_ok = np.abs(dist - follow_dist) <= dist_tol
+isbearing_ok = np.abs(bearing) <= bearing_tol_rad
+
+tracking_mask = isdist_ok & isbearing_ok
 
 # ================== INTEGRAZIONE NEL TEMPO ==================
 
 dt = np.diff(robot_t, prepend=robot_t[0])  # dt[0] = 0
 total_time = robot_t[-1] - robot_t[0]
 tracking_time = np.sum(dt[tracking_mask])
-
 tracking_percent = 100.0 * tracking_time / total_time
-
 
 print("\n===== TIME OF TRACKING =====")
 print(f"Total time:       {total_time:.2f} s")
 print(f"Tracking time:    {tracking_time:.2f} s")
 print(f"Time of tracking: {tracking_percent:.1f} %")
 
-# --- RMSE POSIZIONE ---
+#========= COMPUTE RMSE ==========
+
 rmse_x = rmse(robot_data[:, 0], target_on_robot[:, 0])
 rmse_y = rmse(robot_data[:, 1], target_on_robot[:, 1])
 
-
-# --- RMSE ORIENTAZIONE ---
 # direzione dal robot verso il target
 dx = target_on_robot[:, 0] - robot_data[:, 0]
 dy = target_on_robot[:, 1] - robot_data[:, 1]
@@ -240,7 +237,6 @@ else:
         print(f"Distanza minima: {min_distance:.2f} m")
 
 
-
 # ================== PLOT TRAJECTORY 2D ==================
 plt.figure(figsize=(10,5)) 
 plt.plot(robot_x, robot_y, label='/ground_truth', color='red', linewidth=2, linestyle='-')
@@ -258,23 +254,22 @@ plt.show()
 if len(t_cmd) > 0: #allineamento del tempo 
     t_cmd = t_cmd - t_cmd[0]
 
-# 2. Creazione Plot usando la tua "forma"
-plt.figure(figsize=(10,8)) # Figura un po' più alta per contenere due grafici
+#
+plt.figure(figsize=(10,8)) 
 
-# --- Primo Grafico: Velocità Lineare (v) ---
-plt.subplot(2, 1, 1) # 2 righe, 1 colonna, grafico numero 1
+# === Primo Grafico: Velocità Lineare (v) ===
+plt.subplot(2, 1, 1) 
 plt.plot(t_cmd, v_cmd, label='Linear Velocity (v)', color='blue', linewidth=2, linestyle='-')
-plt.title("Command Signal Profiles (v, w)") # Titolo in alto
+plt.title("Command Signal Profiles (v, w)") 
 plt.ylabel("Linear Vel [m/s]")
 plt.grid(True)
 plt.legend(loc="upper right")
 
-# --- Secondo Grafico: Velocità Angolare (w) ---
-plt.subplot(2, 1, 2) # 2 righe, 1 colonna, grafico numero 2
+# ==== Secondo Grafico: Velocità Angolare (w) ====
+plt.subplot(2, 1, 2) 
 plt.plot(t_cmd, w_cmd, label='Angular Velocity (w)', color='orange', linewidth=2, linestyle='-')
-plt.xlabel("Time [s]") # L'asse X (Tempo) si mette solo in basso
+plt.xlabel("Time [s]") 
 plt.ylabel("Angular Vel [rad/s]")
 plt.grid(True)
 plt.legend(loc="upper right")
 plt.show()
-
