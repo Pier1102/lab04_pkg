@@ -13,7 +13,9 @@ from sensor_msgs.msg import LaserScan
 from lab04_pkg.utils import rmse , normalize_angle
 
 #bag_path = "/home/pier/Desktop/rosbag2_PIER"
-bag_path = "/home/pier/Desktop/rosbag2_Michele"
+bag_path='/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag2_PIER'
+bag_path='/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag2_Michele'
+bag_path='/home/pier/ros2_ws/src/lab04_pkg/lab04_pkg/rosbag2Cesare'
 #bag_path = "/home/pier/Desktop/rosbag2Cesare"
 reader = Rosbag2Reader(bag_path)
 
@@ -93,10 +95,6 @@ else:
         print(f"Distanza media: {avg_distance:.2f} m")
         print(f"Distanza minima: {min_distance:.2f} m")
 
-#=====compute time tracking ======
-follow_dist     = 0.2                 # distanza ideale 
-dist_tol        = 0.3                 # tolleranza sulla distanza
-bearing_tol_rad = math.radians(60.0)   # 60 gradi
 
 
 #=====PLOT =====
@@ -147,7 +145,7 @@ for topic_name, msg, t in reader:
                 lm = msg.landmarks[0] # Prendiamo il primo target
                 r = lm.range          # Distanza
                 b = lm.bearing        # Angolo relativo
-                
+            
                 glob_target_x = current_rob_x + r * np.cos(current_rob_theta + b)
                 glob_target_y = current_rob_y + r * np.sin(current_rob_theta + b)
                 
@@ -201,11 +199,32 @@ interp_target = interp1d(
     landmark_t,
     camera_data,
     axis=0,
-    fill_value="extrapolate",
+    bounds_error=False,
+    fill_value=np.nan,
     kind="linear"
 )
 
-target_on_robot = interp_target(odom_t)
+
+target_on_robot = interp_target(odom_t) # Qui avremo dei NaN se odom_t è fuori dal range camera
+
+# Vogliamo sapere:per ogni istante odom_t, quanto tempo fa abbiamo visto l'ultimo target
+# Usiamo 'previous' che ci dice il timestamp dell'ultimo sample camera valido PRIMA di odom_t
+last_cam_time_interp = interp1d(
+    landmark_t, 
+    landmark_t, 
+    kind='previous', 
+    bounds_error=False, 
+    fill_value=0
+)
+
+last_seen_times = last_cam_time_interp(odom_t)
+time_since_last_seen = odom_t - last_seen_times
+
+# Se sono passati più di 0.5 secondi dall'ultimo frame camera, il target è PERSO.
+# (La camera pubblica a ~6Hz, quindi 0.5s sono circa 3 frame persi)
+MAX_DATA_GAP = 0.5 
+is_data_fresh = time_since_last_seen <= MAX_DATA_GAP
+
 tgt_x = target_on_robot[:, 0]
 tgt_y = target_on_robot[:, 1]
 tgt_th = target_on_robot[:, 2]  
@@ -217,16 +236,20 @@ dist = np.hypot(dx, dy)
 angle_to_target = np.arctan2(dy, dx)
 bearing = normalize_angle(angle_to_target - odom_th)  # wrap in [-pi, pi]
 
-isdist_ok = np.abs(dist - follow_dist) <= dist_tol
-isbearing_ok = np.abs(bearing) <= bearing_tol_rad
+#=====compute time tracking ======
+dist_max=3.0              # distanza massima per considerare il target
+bearing_tol_rad = math.radians(60.0)   # 60 gradi
 
-tracking_mask = isdist_ok & isbearing_ok
+isdist_ok = (dist <= dist_max) & np.isfinite(dist)
+isbearing_ok = (np.abs(bearing) <= bearing_tol_rad) & np.isfinite(bearing)
+
+is_tracking = isdist_ok & isbearing_ok & is_data_fresh
 
 # ================== INTEGRAZIONE NEL TEMPO ==================
 
 dt = np.diff(odom_t, prepend=odom_t[0])  # dt[0] = 0
 total_time = odom_t[-1] - odom_t[0]
-tracking_time = np.sum(dt[tracking_mask])
+tracking_time = np.sum(dt[is_tracking])
 tracking_percent = 100.0 * tracking_time / total_time
 
 print("\n===== TIME OF TRACKING =====")
@@ -234,31 +257,41 @@ print(f"Total time:       {total_time:.2f} s")
 print(f"Tracking time:    {tracking_time:.2f} s")
 print(f"Time of tracking: {tracking_percent:.1f} %")
 
+# vediamo dove abbiamo dati validi del target (non NaN)
+# Basta controllare la coordinata X (se X è NaN, anche Y sarà NaN)
+valid_rmse = np.isfinite(target_on_robot[:, 0])
 
-#========= COMPUTE RMSE ==========
+if np.sum(valid_rmse) == 0:
+    print("Impossibile calcolare RMSE: Nessun dato target valido trovato o sovrapposto all'odometria.")
+else:
+    # filtraggio dei dati validi
+    odom_x_valid = odom_data[valid_rmse, 0]
+    odom_y_valid = odom_data[valid_rmse, 1]
+    odom_th_valid = odom_data[valid_rmse, 2]
 
-rmse_x = rmse(odom_data[:, 0], target_on_robot[:, 0])
-rmse_y = rmse(odom_data[:, 1], target_on_robot[:, 1])
+    target_x_valid = target_on_robot[valid_rmse, 0]
+    target_y_valid = target_on_robot[valid_rmse, 1]
 
-# direzione dal robot verso il target
-dx = target_on_robot[:, 0] - odom_data[:, 0]
-dy = target_on_robot[:, 1] - odom_data[:, 1]
-angle_to_target = np.arctan2(dy, dx)
+    rmse_x = rmse(odom_x_valid, target_x_valid)
+    rmse_y = rmse(odom_y_valid, target_y_valid)
 
-# errore di heading del robot rispetto al target
-heading_err = normalize_angle(odom_data[:, 2] - angle_to_target)
+    dx_valid = target_x_valid - odom_x_valid
+    dy_valid = target_y_valid - odom_y_valid
+    
+    # Angolo ideale verso il target
+    angle_to_target_valid = np.arctan2(dy_valid, dx_valid)
 
-# RMSE angolare
-rmse_heading = math.sqrt(np.mean(heading_err**2))
+    # Errore di heading
+    heading_err_valid = normalize_angle(odom_th_valid - angle_to_target_valid)
 
+    # RMSE angolare
+    rmse_heading = math.sqrt(np.mean(heading_err_valid**2))
 
-print("\n===== RMSE  =====")
-print(f"RMSE X:        {rmse_x:.3f} m")
-print(f"RMSE Y:        {rmse_y:.3f} m")
-print(f"RMSE Heading:  {math.degrees(rmse_heading):.3f} deg")
-
-
-
+    print("\n===== RMSE =====")
+    print(f"RMSE X:        {rmse_x:.3f} m")
+    print(f"RMSE Y:        {rmse_y:.3f} m")
+    print(f"RMSE Heading:  {math.degrees(rmse_heading):.3f} deg")
+   
 
 plt.figure(figsize=(10,5)) 
 plt.plot(landmark_x, landmark_y, label='/camera/landmarks', color='red', linewidth=2, linestyle='-')

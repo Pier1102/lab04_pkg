@@ -48,11 +48,6 @@ if n_total > 0:
 else:
     print("\nNo status messages found in the bag.")
 
-#===== COMPUTE TIME OF TRACKING ======
-
-follow_dist     = 0.2                 # distanza ideale 
-dist_tol        = 0.3                 # tolleranza sulla distanza
-bearing_tol_rad = math.radians(60.0)   # 60 gradi
 
 robot_topic  = "/ground_truth"
 target_topic = "/dynamic_goal_pose"
@@ -146,11 +141,24 @@ interp_target = interp1d(
     target_t,
     target_data,
     axis=0,
-    fill_value="extrapolate",
+    bounds_error=False,
+    fill_value=np.nan,
     kind="linear"
 )
 
 target_on_robot = interp_target(robot_t)
+
+last_target_time_interp = interp1d(
+    target_t, 
+    target_t, 
+    kind='previous', 
+    bounds_error=False, 
+    fill_value=0
+)
+
+last_seen_times = last_target_time_interp(robot_t)
+time_since_last_seen = robot_t - last_seen_times
+
 tgt_x = target_on_robot[:, 0]
 tgt_y = target_on_robot[:, 1]
 tgt_th = target_on_robot[:, 2]  
@@ -164,16 +172,21 @@ dist = np.hypot(dx, dy)
 angle_to_target = np.arctan2(dy, dx)
 bearing = normalize_angle(angle_to_target - robot_th)  # wrap in [-pi, pi]
 
-isdist_ok = np.abs(dist - follow_dist) <= dist_tol
-isbearing_ok = np.abs(bearing) <= bearing_tol_rad
+#=====compute time tracking ======
+dist_max=3.0              # distanza massima per considerare il target
+bearing_tol_rad = math.radians(60.0)   # 60 gradi
 
-tracking_mask = isdist_ok & isbearing_ok
+
+isdist_ok = (dist <= dist_max) & np.isfinite(dist)
+isbearing_ok = (np.abs(bearing) <= bearing_tol_rad) & np.isfinite(bearing)
+
+is_tracking = isdist_ok & isbearing_ok 
 
 # ================== INTEGRAZIONE NEL TEMPO ==================
 
 dt = np.diff(robot_t, prepend=robot_t[0])  # dt[0] = 0
 total_time = robot_t[-1] - robot_t[0]
-tracking_time = np.sum(dt[tracking_mask])
+tracking_time = np.sum(dt[is_tracking])
 tracking_percent = 100.0 * tracking_time / total_time
 
 print("\n===== TIME OF TRACKING =====")
@@ -181,27 +194,40 @@ print(f"Total time:       {total_time:.2f} s")
 print(f"Tracking time:    {tracking_time:.2f} s")
 print(f"Time of tracking: {tracking_percent:.1f} %")
 
-#========= COMPUTE RMSE ==========
+# vediamo dove abbiamo dati validi del target (non NaN)
+# Basta controllare la coordinata X (se X è NaN, anche Y sarà NaN)
+valid_rmse = np.isfinite(target_on_robot[:, 0])
 
-rmse_x = rmse(robot_data[:, 0], target_on_robot[:, 0])
-rmse_y = rmse(robot_data[:, 1], target_on_robot[:, 1])
+if np.sum(valid_rmse) == 0:
+    print("Impossibile calcolare RMSE: Nessun dato target valido trovato o sovrapposto all'odometria.")
+else:
+    # filtraggio dei dati validi
+    robot_x_valid = robot_data[valid_rmse, 0]
+    robot_y_valid = robot_data[valid_rmse, 1]
+    robot_th_valid = robot_data[valid_rmse, 2]
 
-# direzione dal robot verso il target
-dx = target_on_robot[:, 0] - robot_data[:, 0]
-dy = target_on_robot[:, 1] - robot_data[:, 1]
-angle_to_target = np.arctan2(dy, dx)
+    target_x_valid = target_on_robot[valid_rmse, 0]
+    target_y_valid = target_on_robot[valid_rmse, 1]
 
-# errore di heading del robot rispetto al target
-heading_err = normalize_angle(robot_data[:, 2] - angle_to_target)
+    rmse_x = rmse(robot_x_valid, target_x_valid)
+    rmse_y = rmse(robot_y_valid, target_y_valid)
 
-# RMSE angolare
-rmse_heading = math.sqrt(np.mean(heading_err**2))
+    dx_valid = target_x_valid - robot_x_valid
+    dy_valid = target_y_valid - robot_y_valid
 
+    # Angolo ideale verso il target
+    angle_to_target_valid = np.arctan2(dy_valid, dx_valid)
 
-print("\n===== RMSE  =====")
-print(f"RMSE X:        {rmse_x:.3f} m")
-print(f"RMSE Y:        {rmse_y:.3f} m")
-print(f"RMSE Heading:  {math.degrees(rmse_heading):.3f} deg")
+    # Errore di heading
+    heading_err_valid = normalize_angle(robot_th_valid - angle_to_target_valid)
+
+    # RMSE angolare
+    rmse_heading = math.sqrt(np.mean(heading_err_valid**2))
+
+    print("\n===== RMSE =====")
+    print(f"RMSE X:        {rmse_x:.3f} m")
+    print(f"RMSE Y:        {rmse_y:.3f} m")
+    print(f"RMSE Heading:  {math.degrees(rmse_heading):.3f} deg")
 
 #=================== Overall average and minimum distance [m] from the obstacles ===================
 topics_to_read = ["/scan"]
@@ -252,9 +278,8 @@ plt.axis('equal')
 plt.show()
 
 if len(t_cmd) > 0: #allineamento del tempo 
-    t_cmd = t_cmd - t_cmd[0]
+    t_cmd = 1e-9 * (t_cmd - t_cmd[0])
 
-#
 plt.figure(figsize=(10,8)) 
 
 # === Primo Grafico: Velocità Lineare (v) ===
